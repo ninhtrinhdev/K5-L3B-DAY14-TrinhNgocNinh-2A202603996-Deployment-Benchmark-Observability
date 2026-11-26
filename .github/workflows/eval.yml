@@ -1,0 +1,36 @@
+# Quality gate (Exercise 7.3): chạy eval trên golden dataset, fail nếu accuracy < 85%
+# hoặc có câu bị regression so với baseline. run_eval.py trả exit code 1 khi không đạt
+# → job đỏ → branch protection chặn merge PR.
+name: quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 06-lab-complete/benchmark-observability/develop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start agent v2
+        # MOCK_ERROR_RATE=0: gate đo chất lượng câu trả lời, không đo lỗi upstream ngẫu nhiên
+        run: |
+          AGENT_VERSION=v2 MOCK_ERROR_RATE=0 PORT=8000 nohup python app.py > agent.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 1; done
+
+      - name: Eval + quality gate
+        run: |
+          python eval/run_eval.py --url http://localhost:8000 --min-accuracy 0.85 \
+            --baseline ../../../reports/eval_v2_fixed.json
