@@ -17,7 +17,7 @@ Blueprint path: `06-lab-complete/render.yaml` (`rootDir: 06-lab-complete`, `heal
 
 > Railway (Exercise 3.1) không dùng được: `railway init` trả `Your trial has expired. Please select a plan to continue using Railway.` Mình không nhập thẻ mà chuyển sang Render.
 >
-> Gói Free của Render tắt service khi không có request, nên lần gọi đầu sau một lúc không dùng có thể chậm ~50 giây.
+> Gói Free của Render tắt service khi không có request, nên lần gọi đầu sau một lúc không dùng có thể chậm ~50 giây. Workflow [`.github/workflows/keep-alive.yml`](.github/workflows/keep-alive.yml) gọi `/health` mỗi 10 phút để service luôn thức.
 
 ## Test Commands
 
