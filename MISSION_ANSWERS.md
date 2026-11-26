@@ -185,7 +185,49 @@ Dọn stack: `docker compose -p k5-day14-docker down -v`.
 
 ## Part 3: Cloud Deployment
 
-_(Điền sau khi deploy agent Part 6 ở CP6.)_
+Theo CP6, deploy luôn agent Part 6 (`06-lab-complete/`), không deploy app mẫu trong `03-cloud-deployment/`. Chi tiết: [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Exercise 3.1: Railway
+
+Đã cài Railway CLI 5.75.0 và đăng nhập, nhưng tạo project thì bị chặn:
+
+```text
+$ railway init --name k5-day14-agent
+Your trial has expired. Please select a plan to continue using Railway.
+```
+
+Muốn tiếp phải chọn gói trả phí (cần thẻ), nên chuyển sang Render (Exercise 3.2). `railway.toml` vẫn được giữ đúng cấu hình và qua kiểm tra tĩnh của `check_production_ready.py`.
+
+### Exercise 3.2: Render (nền tảng chính)
+
+- **URL:** https://production-ai-agent-qxc3.onrender.com
+- Blueprint `k5-day14-agent` từ `06-lab-complete/render.yaml`, 2 service ở Singapore, gói Free: `production-ai-agent` (Docker) và `agent-redis` (Key Value). `AGENT_API_KEY` do Render tự sinh, `REDIS_URL` nối từ Key Value.
+- 4 lệnh tự kiểm của CP6: `/health` **200**, `/ready` **200** (`{"status":"ready","redis":"ok"}`), `/ask` không key **401**, `/ask` có key **200**.
+- Ảnh: `screenshots/dashboard.png`, `screenshots/running.png`, `screenshots/test.png`.
+
+### So sánh `railway.toml` và `render.yaml`
+
+| | `railway.toml` | `render.yaml` (Blueprint) |
+|---|---|---|
+| Phạm vi | Cấu hình build/deploy của **một service** | Mô tả **cả hạ tầng**: web service + Key Value, region, plan |
+| Build | `builder = "DOCKERFILE"`, `dockerfilePath` | `runtime: docker`, `rootDir: 06-lab-complete`, `dockerfilePath: ./Dockerfile` (khai báo được thư mục con trong monorepo) |
+| Health check | `healthcheckPath = "/health"`, `healthcheckTimeout` | `healthCheckPath: /health` |
+| Restart | `restartPolicyType = "ON_FAILURE"`, số lần thử | Không khai báo, Render tự restart |
+| Redis | Không có trong file; phải thêm bằng `railway add --database redis` rồi đặt `REDIS_URL` tham chiếu | Khai báo luôn `type: keyvalue` và nối `REDIS_URL` bằng `fromService ... property: connectionString` |
+| Secret / env | Không có trong file; đặt bằng `railway variables` hoặc dashboard | Khai báo trong file nhưng secret dùng `generateValue: true` (hoặc `sync: false`), không ghi giá trị thật |
+| Port | Railway cấp `PORT`, app tự đọc | Render cấp `PORT` (mặc định 10000), app tự đọc |
+
+**Vì sao khác:** `railway.toml` là *config-as-code* cho cách build và chạy một service; tài nguyên đi kèm (database, biến) được tạo bằng CLI hay dashboard. `render.yaml` là *infrastructure-as-code*: một file tạo lại được toàn bộ stack (kể cả Redis và cách nối biến) từ git, phù hợp monorepo nhờ `rootDir`. Đổi lại phải viết nhiều hơn và tuân theo schema của Render. Railway CLI còn cảnh báo `railway.toml` sẽ thay bằng `.railway/railway.ts` (chạy được tới 01/12/2026).
+
+### Exercise 3.3: Cloud Run (đọc `cloudbuild.yaml` + `service.yaml`, không deploy)
+
+Pipeline Cloud Build chạy khi có commit mới, gồm 4 bước nối tiếp nhau (`waitFor`), bước nào lỗi thì dừng, không deploy:
+1. **test**: trong `python:3.11-slim`, cài requirements rồi chạy `pytest tests/`.
+2. **build**: `docker build`, gắn tag `gcr.io/$PROJECT_ID/ai-agent:$COMMIT_SHA` và `:latest`, dùng `--cache-from` image cũ để tận dụng layer cache.
+3. **push**: đẩy cả hai tag lên Container Registry.
+4. **deploy**: `gcloud run deploy ai-agent` bằng image đúng commit SHA, ở `asia-southeast1`, public (`--allow-unauthenticated`), 1–10 instance (`min-instances=1` tránh cold start), 512 MiB / 1 CPU, timeout 60 s, `OPENAI_API_KEY` lấy từ Secret Manager.
+
+`service.yaml` là bản khai báo (Knative) tương đương: autoscale theo 80 request đồng thời mỗi instance, `livenessProbe` gọi `/health`, `startupProbe` gọi `/ready`, `AGENT_API_KEY` và `OPENAI_API_KEY` lấy từ secret thay vì ghi thẳng.
 
 ---
 
@@ -497,3 +539,4 @@ Chạy bản đầy đủ (có Docker) trong `06-lab-complete/`:
 | Part 2 | Hỏi vì sao `docker build` báo `GetFileAttributesEx 02-docker: The system cannot find the file specified` | Phải build từ gốc repo vì Dockerfile `COPY` theo đường dẫn tính từ gốc | Chạy lại từ gốc repo, build thành công |
 | Part 2 | Hỏi vì sao `curl` JSON vào `/ask` trả 422 `loc: ["query","question"]` | App develop nhận `question` qua query string | Gọi `?question=...` → 200 |
 | Part 7 | Dùng Claude Code chạy load test, eval, stack Prometheus/Grafana/Jaeger/Locust, thí nghiệm alert, chụp ảnh và soạn `BENCHMARK_REPORT.md`; thêm 2 entry `KNOWLEDGE_BASE`, metric `agent_question_length_chars`, job CI `.github/workflows/eval.yml` | Lệnh, file JSON/CSV, ảnh, bản nháp báo cáo | Mọi số trong báo cáo lấy từ `reports/*.json`, `benchmark-results/*.csv` và API Prometheus/Jaeger. Eval cuối 23/23 không regression. Chạy thử job CI: v2 exit 0, v1 exit 1. Phát hiện và sửa: Dockerfile production thiếu `PYTHONUSERBASE` (agent không khởi động được); lệnh `compose run locust` tự đưa agent về 2 replica nên chạy lại benchmark scale với `--no-deps` |
+| Part 3 | Dùng Claude Code cài Railway CLI, kiểm tra `render.yaml` theo tài liệu Blueprint của Render, chạy test trên URL public, viết `DEPLOYMENT.md` và mục Part 3 | Lệnh test, bản nháp tài liệu | Tự đăng nhập Railway/Render và tạo Blueprint trên dashboard; tự chụp `dashboard.png`, `running.png`, `test.png`. 4 lệnh CP6 cho 200/200/401/200, `check_production_ready.py --public-url` đạt mục 12. Key chỉ lưu trong `06-lab-complete/.env` (đã ignore), không dán vào chat hay repo |
