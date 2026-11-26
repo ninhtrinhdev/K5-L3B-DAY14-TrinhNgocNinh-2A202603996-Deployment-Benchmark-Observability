@@ -1,0 +1,28 @@
+# Giữ agent trên Render (gói Free) không bị "ngủ".
+# Render tắt service free sau ~15 phút không có request; lần gọi đầu sau đó mất ~50s.
+# Job này gọi /health mỗi 10 phút. Gói free có 750 giờ/tháng, đủ cho 1 service chạy liên tục.
+# Lưu ý: GitHub chỉ chạy lịch (schedule) trên nhánh mặc định (main), và có thể trễ vài phút.
+name: keep-alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GET /health
+        env:
+          BASE: https://production-ai-agent-qxc3.onrender.com
+        run: |
+          # Chờ tối đa 120s cho lần đánh thức, thử lại 3 lần
+          for i in 1 2 3; do
+            code=$(curl -sS -m 120 -o /dev/null -w '%{http_code}' "$BASE/health" || echo 000)
+            echo "lần $i: /health -> $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          exit 1
